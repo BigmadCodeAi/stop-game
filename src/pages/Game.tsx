@@ -7,14 +7,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import Voting from "./Voting";
 
-type Player = {
+export type Player = {
   id: string;
   name: string;
   score: number;
 };
 
-type Round = {
+export type Round = {
   id: string;
   letter: string;
   categories: string[];
@@ -106,16 +107,17 @@ const Game = () => {
         .channel(`game-players-${gameData.id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${gameData.id}` },
           () => {
-            // Refetch players on any change
             supabase.from('players').select('*').eq('game_id', gameData.id).then(({ data }) => setPlayers(data || []));
           }
         ).subscribe();
 
       const roundChannel = supabase
         .channel(`game-rounds-${gameData.id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rounds', filter: `id=eq.${activeOrVotingRound?.id}` },
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rounds', filter: `game_id=eq.${gameData.id}` },
           (payload) => {
-            setCurrentRound(payload.new as Round);
+            if (payload.new.status === 'voting' || payload.new.status === 'active') {
+              setCurrentRound(payload.new as Round);
+            }
           }
         ).subscribe();
 
@@ -140,7 +142,8 @@ const Game = () => {
     );
   }
 
-  const isRoundOver = currentRound?.status !== 'active';
+  const isRoundActive = currentRound?.status === 'active';
+  const isVotingPhase = currentRound?.status === 'voting';
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 p-4 lg:p-8">
@@ -170,7 +173,9 @@ const Game = () => {
 
         {/* Game Area */}
         <div className="lg:col-span-3">
-          {currentRound ? (
+          {isVotingPhase && currentRound ? (
+            <Voting round={currentRound} players={players} />
+          ) : isRoundActive && currentRound ? (
             <Card>
               <CardHeader className="text-center">
                 <p className="text-xl text-gray-600 dark:text-gray-400">The letter is</p>
@@ -184,22 +189,17 @@ const Game = () => {
                       placeholder={`Enter a ${category.toLowerCase()}...`}
                       onChange={(e) => handleAnswerChange(category, e.target.value)}
                       className="mt-1"
-                      disabled={isRoundOver || hasSubmitted}
+                      disabled={hasSubmitted}
                     />
                   </div>
                 ))}
                 <Button 
                   className="w-full text-xl font-bold py-6 mt-6" 
                   onClick={handleSubmitAnswers}
-                  disabled={isRoundOver || hasSubmitted}
+                  disabled={hasSubmitted}
                 >
-                  {isRoundOver ? "Round Over" : (hasSubmitted ? "Submitted!" : "STOP!")}
+                  {hasSubmitted ? "Submitted!" : "STOP!"}
                 </Button>
-                {isRoundOver && (
-                  <p className="text-center text-green-500 mt-4">
-                    Round over! Waiting for scoring...
-                  </p>
-                )}
               </CardContent>
             </Card>
           ) : (
