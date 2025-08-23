@@ -14,17 +14,22 @@ import { supabase } from "@/integrations/supabase/client";
 import { showError } from "@/utils/toast";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useI18n } from "@/contexts/I18nContext";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const Index = () => {
+  const { t } = useI18n();
   const [createPlayerName, setCreatePlayerName] = useState("");
   const [joinPlayerName, setJoinPlayerName] = useState("");
   const [gameId, setGameId] = useState("");
+  const [targetScore, setTargetScore] = useState(50);
+  const [maxRounds, setMaxRounds] = useState(5);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleCreateGame = async () => {
     if (!createPlayerName.trim()) {
-      showError("Please enter your name.");
+      showError(t('enterYourName'));
       return;
     }
     setLoading(true);
@@ -33,7 +38,12 @@ const Index = () => {
 
       const { data: gameData, error: gameError } = await supabase
         .from("games")
-        .insert({ game_code: gameCode, status: 'lobby' })
+        .insert({ 
+          game_code: gameCode, 
+          status: 'lobby',
+          target_score: targetScore,
+          max_rounds: maxRounds
+        })
         .select()
         .single();
 
@@ -60,7 +70,7 @@ const Index = () => {
       navigate(`/lobby/${gameCode}`);
     } catch (error: any) {
       console.error("Error creating game:", error);
-      showError(error.message || "Failed to create game.");
+      showError(error.message || t('failedToCreateGame'));
     } finally {
       setLoading(false);
     }
@@ -68,7 +78,7 @@ const Index = () => {
 
   const handleJoinGame = async () => {
     if (!joinPlayerName.trim() || !gameId.trim()) {
-      showError("Please enter your name and a game ID.");
+      showError(t('enterYourName') + " " + t('gameId'));
       return;
     }
     setLoading(true);
@@ -96,7 +106,7 @@ const Index = () => {
       navigate(`/lobby/${gameId.trim().toUpperCase()}`);
     } catch (error: any) {
       console.error("Error joining game:", error);
-      showError(error.message || "Failed to join game.");
+      showError(error.message || t('failedToJoinGame'));
     } finally {
       setLoading(false);
     }
@@ -104,40 +114,71 @@ const Index = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
+      {/* Language Switcher */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="text-center mb-8">
-        <h1 className="text-5xl font-bold tracking-tighter mb-2">STOP</h1>
+        <h1 className="text-5xl font-bold tracking-tighter mb-2">{t('gameTitle')}</h1>
         <p className="text-xl text-gray-600 dark:text-gray-400">
-          The multiplayer word game for live streamers.
+          {t('gameSubtitle')}
         </p>
       </div>
 
       <Tabs defaultValue="create" className="w-full max-w-md">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="create">Create Game</TabsTrigger>
-          <TabsTrigger value="join">Join Game</TabsTrigger>
+          <TabsTrigger value="create">{t('createGame')}</TabsTrigger>
+          <TabsTrigger value="join">{t('joinGame')}</TabsTrigger>
         </TabsList>
         <TabsContent value="create">
           <Card>
             <CardHeader>
-              <CardTitle>Create a New Game</CardTitle>
+              <CardTitle>{t('createGameTitle')}</CardTitle>
               <CardDescription>
-                Enter your name to host a new game lobby.
+                {t('createGameDescription')}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="create-name">Your Name</Label>
+                <Label htmlFor="create-name">{t('yourName')}</Label>
                 <Input
                   id="create-name"
-                  placeholder="Enter your name"
+                  placeholder={t('enterYourName')}
                   value={createPlayerName}
                   onChange={(e) => setCreatePlayerName(e.target.value)}
                 />
               </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="target-score">{t('targetScore')}</Label>
+                <Input
+                  id="target-score"
+                  type="number"
+                  min="10"
+                  max="200"
+                  value={targetScore}
+                  onChange={(e) => setTargetScore(parseInt(e.target.value) || 50)}
+                />
+                <p className="text-sm text-gray-500">{t('targetScoreDescription')}</p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="max-rounds">{t('maxRounds')}</Label>
+                <Input
+                  id="max-rounds"
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={maxRounds}
+                  onChange={(e) => setMaxRounds(parseInt(e.target.value) || 5)}
+                />
+                <p className="text-sm text-gray-500">{t('maxRoundsDescription')}</p>
+              </div>
             </CardContent>
             <CardFooter>
               <Button className="w-full" onClick={handleCreateGame} disabled={!createPlayerName || loading}>
-                {loading ? "Creating..." : "Create Game"}
+                {loading ? t('creating') : t('createGameButton')}
               </Button>
             </CardFooter>
           </Card>
@@ -145,26 +186,26 @@ const Index = () => {
         <TabsContent value="join">
           <Card>
             <CardHeader>
-              <CardTitle>Join an Existing Game</CardTitle>
+              <CardTitle>{t('joinGameTitle')}</CardTitle>
               <CardDescription>
-                Enter your name and the Game ID to join a lobby.
+                {t('joinGameDescription')}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="join-name">Your Name</Label>
+                <Label htmlFor="join-name">{t('yourName')}</Label>
                 <Input
                   id="join-name"
-                  placeholder="Enter your name"
+                  placeholder={t('enterYourName')}
                   value={joinPlayerName}
                   onChange={(e) => setJoinPlayerName(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="game-id">Game ID</Label>
+                <Label htmlFor="game-id">{t('gameId')}</Label>
                 <Input
                   id="game-id"
-                  placeholder="Enter Game ID"
+                  placeholder={t('enterGameId')}
                   value={gameId}
                   onChange={(e) => setGameId(e.target.value.toUpperCase())}
                 />
@@ -172,7 +213,7 @@ const Index = () => {
             </CardContent>
             <CardFooter>
               <Button className="w-full" onClick={handleJoinGame} disabled={!joinPlayerName || !gameId || loading}>
-                {loading ? "Joining..." : "Join Game"}
+                {loading ? t('joining') : t('joinGameButton')}
               </Button>
             </CardFooter>
           </Card>

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { showError } from "@/utils/toast";
+import { showError, showSuccess } from "@/utils/toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import Voting from "./Voting";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { Flag } from "lucide-react";
+import { useI18n } from "@/contexts/I18nContext";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useCategoryTranslator } from "@/utils/category-translator";
 
 export type Player = {
   id: string;
@@ -25,6 +29,8 @@ export type Round = {
 };
 
 const Game = () => {
+  const { t } = useI18n();
+  const { translateCategory } = useCategoryTranslator();
   const { gameCode } = useParams();
   const navigate = useNavigate();
   const [players, setPlayers] = useState<Player[]>([]);
@@ -39,7 +45,7 @@ const Game = () => {
 
     const currentPlayerId = localStorage.getItem("playerId");
     if (!currentPlayerId) {
-      showError("Player session not found.");
+      showError(t('invalidSession'));
       return;
     }
 
@@ -52,7 +58,7 @@ const Game = () => {
     });
 
     if (error) {
-        showError("Failed to submit answers.");
+        showError(t('failedToSubmitAnswers'));
         console.error(error);
         setHasSubmitted(false); // Re-enable on error
     }
@@ -75,8 +81,10 @@ const Game = () => {
 
   useEffect(() => {
     const currentPlayerId = localStorage.getItem("playerId");
+    console.log('Game component - gameCode:', gameCode, 'playerId:', currentPlayerId);
+    
     if (!gameCode || !currentPlayerId) {
-      showError("Invalid session. Redirecting home.");
+      showError(t('invalidSession'));
       navigate("/");
       return;
     }
@@ -86,23 +94,56 @@ const Game = () => {
 
     const fetchAndSubscribe = async () => {
       setLoading(true);
+      
+      // Fetch game data first
       const { data: gameData, error: gameError } = await supabase
         .from("games")
-        .select("id, status, host_player_id, rounds(*), players(*)")
+        .select("id, status, host_player_id")
         .eq("game_code", gameCode)
         .single();
 
       if (gameError || !gameData) {
-        showError("Game not found.");
+        console.error("Game fetch error:", gameError);
+        showError(`Game not found: ${gameError?.message || 'Unknown error'}`);
         navigate("/");
         return;
       }
 
-      setHostPlayerId(gameData.host_player_id);
-      const activeOrVotingRound = gameData.rounds.find(r => r.status === 'active' || r.status === 'voting');
-      setCurrentRound(activeOrVotingRound || null);
-      setPlayers(gameData.players || []);
+      // Check if game is completed
+      if (gameData.status === "completed") {
+        navigate(`/results/${gameCode}`);
+        return;
+      }
 
+      setHostPlayerId(gameData.host_player_id);
+
+      // Fetch rounds separately
+      const { data: roundsData, error: roundsError } = await supabase
+        .from("rounds")
+        .select("*")
+        .eq("game_id", gameData.id);
+
+      if (roundsError) {
+        console.error("Error fetching rounds:", roundsError);
+      } else {
+        const activeOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
+        setCurrentRound(activeOrVotingRound || null);
+      }
+
+      // Fetch players separately
+      const { data: playersData, error: playersError } = await supabase
+        .from("players")
+        .select("*")
+        .eq("game_id", gameData.id);
+
+      if (playersError) {
+        console.error("Error fetching players:", playersError);
+      } else {
+        setPlayers(playersData || []);
+      }
+
+      // Check for existing answers if there's an active round
+      const activeOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
       if (activeOrVotingRound) {
         const { data: existingAnswer } = await supabase
           .from('answers')
@@ -117,39 +158,80 @@ const Game = () => {
       
       setLoading(false);
 
-      playerChannel = supabase
-        .channel(`game-players-${gameData.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${gameData.id}` },
-          () => {
-            supabase.from('players').select('*').eq('game_id', gameData.id).then(({ data }) => setPlayers(data || []));
+      // Use polling instead of real-time subscriptions
+      const pollInterval = setInterval(async () => {
+        try {
+          // Check game status first
+          const { data: gameStatus } = await supabase
+            .from('games')
+            .select('status')
+            .eq('id', gameData.id)
+            .single();
+          
+          if (gameStatus?.status === 'completed') {
+            clearInterval(pollInterval);
+            navigate(`/results/${gameCode}`);
+            return;
           }
-        ).subscribe();
 
-      roundChannel = supabase
-        .channel(`game-rounds-${gameData.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'rounds', filter: `game_id=eq.${gameData.id}` },
-          async () => {
-            const { data: roundsData, error } = await supabase.from('rounds').select('*').eq('game_id', gameData.id);
-            if (error) {
-              console.error("Error refetching rounds", error);
-              return;
-            }
-            const newActiveOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
+          // Refresh players
+          const { data: refreshedPlayers } = await supabase
+            .from('players')
+            .select('*')
+            .eq('game_id', gameData.id);
+          setPlayers(refreshedPlayers || []);
+
+          // Refresh rounds
+          const { data: roundsData, error } = await supabase
+            .from('rounds')
+            .select('*')
+            .eq('game_id', gameData.id);
+          
+          if (!error && roundsData) {
+            const newActiveOrVotingRound = roundsData.find(r => r.status === 'active' || r.status === 'voting');
             setCurrentRound(newActiveOrVotingRound || null);
           }
-        ).subscribe();
+        } catch (error) {
+          console.error('Polling error:', error);
+        }
+      }, 2000); // Poll every 2 seconds
+
+      // Store interval for cleanup
+      return () => clearInterval(pollInterval);
     };
 
     fetchAndSubscribe();
 
     return () => {
-      if (playerChannel) supabase.removeChannel(playerChannel);
-      if (roundChannel) supabase.removeChannel(roundChannel);
+      // Cleanup will be handled by the polling function
     };
   }, [gameCode, navigate]);
 
   const handleAnswerChange = (category: string, value: string) => {
     setAnswers(prev => ({ ...prev, [category]: value }));
+  };
+
+  const handleEndGame = async () => {
+    if (!hostPlayerId || !gameCode) return;
+    
+    const currentPlayerId = localStorage.getItem("playerId");
+    if (currentPlayerId !== hostPlayerId) {
+      showError(t('onlyHostCanEndGame'));
+      return;
+    }
+
+    const { error } = await supabase
+      .from("games")
+      .update({ status: "completed" })
+      .eq("game_code", gameCode);
+
+    if (error) {
+      showError(t('failedToEndGame'));
+      console.error(error);
+    } else {
+      showSuccess(t('success'));
+      navigate(`/results/${gameCode}`);
+    }
   };
 
   if (loading) {
@@ -165,12 +247,17 @@ const Game = () => {
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 p-4 lg:p-8">
+      {/* Language Switcher */}
+      <div className="absolute top-4 right-4 z-10">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 max-w-7xl mx-auto">
         {/* Player Scoreboard */}
         <div className="lg:col-span-1">
           <Card>
             <CardHeader>
-              <CardTitle>Players</CardTitle>
+              <CardTitle>{t('players')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {players.sort((a, b) => b.score - a.score).map((player) => (
@@ -187,6 +274,25 @@ const Game = () => {
               ))}
             </CardContent>
           </Card>
+          
+          {/* End Game Button (Host Only) */}
+          {hostPlayerId && localStorage.getItem("playerId") === hostPlayerId && (
+            <Card className="mt-4">
+              <CardContent className="pt-6">
+                <Button 
+                  onClick={handleEndGame}
+                  variant="destructive"
+                  className="w-full flex items-center gap-2"
+                >
+                  <Flag className="h-4 w-4" />
+                  {t('endGame')}
+                </Button>
+                <p className="text-xs text-gray-500 mt-2 text-center">
+                  {t('onlyVisibleToHost')}
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Game Area */}
@@ -196,15 +302,15 @@ const Game = () => {
           ) : isRoundActive && currentRound ? (
             <Card>
               <CardHeader className="text-center">
-                <p className="text-xl text-gray-600 dark:text-gray-400">The letter is</p>
+                <p className="text-xl text-gray-600 dark:text-gray-400">{t('theLetterIs')}</p>
                 <h1 className="text-8xl font-bold tracking-tighter">{currentRound.letter}</h1>
               </CardHeader>
               <CardContent className="space-y-4">
                 {currentRound.categories.map((category) => (
                   <div key={category}>
-                    <label className="font-semibold">{category}</label>
+                    <label className="font-semibold">{translateCategory(category)}</label>
                     <Input
-                      placeholder={`Enter a ${category.toLowerCase()}...`}
+                      placeholder={t('enterAnswer', { category: translateCategory(category).toLowerCase() })}
                       onChange={(e) => handleAnswerChange(category, e.target.value)}
                       className="mt-1"
                       disabled={hasSubmitted}
@@ -216,13 +322,13 @@ const Game = () => {
                   onClick={handleSubmitAnswers}
                   disabled={hasSubmitted}
                 >
-                  {hasSubmitted ? "Submitted!" : "STOP!"}
+                  {hasSubmitted ? t('submitted') : t('stopButton')}
                 </Button>
               </CardContent>
             </Card>
           ) : (
             <Card className="flex items-center justify-center h-96">
-              <p className="text-xl text-gray-500">Waiting for the next round...</p>
+              <p className="text-xl text-gray-500">{t('waitingForNextRound')}</p>
             </Card>
           )}
         </div>

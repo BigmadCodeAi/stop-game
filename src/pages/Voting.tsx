@@ -8,6 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { showError } from "@/utils/toast";
+import { useI18n } from "@/contexts/I18nContext";
+import { useCategoryTranslator } from "@/utils/category-translator";
 
 interface VotingProps {
   round: Round;
@@ -29,6 +31,8 @@ type Vote = {
 };
 
 const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
+  const { t } = useI18n();
+  const { translateCategory } = useCategoryTranslator();
   const [allAnswers, setAllAnswers] = useState<PlayerAnswer[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +84,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
     });
 
     if (error) {
-      showError("Failed to cast vote.");
+      showError(t('failedToSubmitAnswers'));
       console.error(error);
     }
   };
@@ -94,7 +98,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
     });
 
     if (error) {
-      showError("Failed to calculate scores.");
+      showError(t('failedToCalculateScores'));
       console.error(error);
       setIsSubmitting(false);
     }
@@ -121,14 +125,14 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-center text-3xl">Voting Time!</CardTitle>
-        <p className="text-center text-gray-500">Review the answers for the letter "{round.letter}"</p>
+        <CardTitle className="text-center text-3xl">{t('votingTime')}</CardTitle>
+        <p className="text-center text-gray-500">{t('reviewAnswers', { letter: round.letter })}</p>
       </CardHeader>
       <CardContent>
         <Accordion type="single" collapsible className="w-full" defaultValue={round.categories[0]}>
           {round.categories.map((category) => (
             <AccordionItem value={category} key={category}>
-              <AccordionTrigger className="text-xl">{category}</AccordionTrigger>
+              <AccordionTrigger className="text-xl">{translateCategory(category)}</AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-4">
                   {answersByCategory[category]?.map(({ playerId, playerName, playerAvatar, answer }, index) => {
@@ -170,7 +174,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
       {isHost && (
         <CardFooter>
             <Button className="w-full" onClick={handleFinishVoting} disabled={isSubmitting}>
-              {isSubmitting ? "Calculating..." : "Finish Voting & Calculate Scores"}
+              {isSubmitting ? t('calculating') : t('finishVoting')}
             </Button>
         </CardFooter>
       )}
