@@ -13,7 +13,7 @@ type Player = {
 };
 
 const Lobby = () => {
-  const { gameId: gameCode } = useParams();
+  const { gameCode } = useParams();
   const navigate = useNavigate();
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameDetails, setGameDetails] = useState<any>(null);
