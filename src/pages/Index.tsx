@@ -10,6 +10,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { supabase } from "@/integrations/supabase/client";
+import { showError } from "@/utils/toast";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -17,24 +19,86 @@ const Index = () => {
   const [createPlayerName, setCreatePlayerName] = useState("");
   const [joinPlayerName, setJoinPlayerName] = useState("");
   const [gameId, setGameId] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleCreateGame = () => {
-    // Placeholder for Supabase logic
-    console.log("Creating game for player:", createPlayerName);
-    // For now, we'll generate a random ID and navigate to the lobby
-    const newGameId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    navigate(`/lobby/${newGameId}`);
+  const handleCreateGame = async () => {
+    if (!createPlayerName.trim()) {
+      showError("Please enter your name.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const gameCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      const { data: gameData, error: gameError } = await supabase
+        .from("games")
+        .insert({ game_code: gameCode })
+        .select()
+        .single();
+
+      if (gameError || !gameData) throw gameError;
+
+      const { data: playerData, error: playerError } = await supabase
+        .from("players")
+        .insert({ game_id: gameData.id, name: createPlayerName })
+        .select()
+        .single();
+
+      if (playerError || !playerData) throw playerError;
+
+      const { error: updateError } = await supabase
+        .from("games")
+        .update({ host_player_id: playerData.id })
+        .eq("id", gameData.id);
+
+      if (updateError) throw updateError;
+
+      sessionStorage.setItem("playerId", playerData.id);
+      sessionStorage.setItem("gameId", gameData.id);
+
+      navigate(`/lobby/${gameCode}`);
+    } catch (error: any) {
+      console.error("Error creating game:", error);
+      showError(error.message || "Failed to create game.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleJoinGame = () => {
-    // Placeholder for Supabase logic
-    console.log(`Player ${joinPlayerName} joining game:`, gameId);
-    if (gameId.trim()) {
+  const handleJoinGame = async () => {
+    if (!joinPlayerName.trim() || !gameId.trim()) {
+      showError("Please enter your name and a game ID.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data: gameData, error: gameError } = await supabase
+        .from("games")
+        .select("id, status")
+        .eq("game_code", gameId.trim())
+        .single();
+
+      if (gameError || !gameData) throw new Error("Game not found.");
+      if (gameData.status !== "lobby") throw new Error("Game has already started.");
+
+      const { data: playerData, error: playerError } = await supabase
+        .from("players")
+        .insert({ game_id: gameData.id, name: joinPlayerName })
+        .select()
+        .single();
+
+      if (playerError || !playerData) throw playerError;
+
+      sessionStorage.setItem("playerId", playerData.id);
+      sessionStorage.setItem("gameId", gameData.id);
+
       navigate(`/lobby/${gameId.trim()}`);
-    } else {
-      // We can show an error toast here later
-      console.error("Game ID is required");
+    } catch (error: any) {
+      console.error("Error joining game:", error);
+      showError(error.message || "Failed to join game.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -72,8 +136,8 @@ const Index = () => {
               </div>
             </CardContent>
             <CardFooter>
-              <Button className="w-full" onClick={handleCreateGame} disabled={!createPlayerName}>
-                Create Game
+              <Button className="w-full" onClick={handleCreateGame} disabled={!createPlayerName || loading}>
+                {loading ? "Creating..." : "Create Game"}
               </Button>
             </CardFooter>
           </Card>
@@ -107,8 +171,8 @@ const Index = () => {
               </div>
             </CardContent>
             <CardFooter>
-              <Button className="w-full" onClick={handleJoinGame} disabled={!joinPlayerName || !gameId}>
-                Join Game
+              <Button className="w-full" onClick={handleJoinGame} disabled={!joinPlayerName || !gameId || loading}>
+                {loading ? "Joining..." : "Join Game"}
               </Button>
             </CardFooter>
           </Card>

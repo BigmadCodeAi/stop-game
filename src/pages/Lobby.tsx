@@ -3,29 +3,111 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useParams, useNavigate } from "react-router-dom";
 import { Copy } from "lucide-react";
-import { showSuccess } from "@/utils/toast";
+import { showSuccess, showError } from "@/utils/toast";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
-// Placeholder data for players in the lobby
-const placeholderPlayers = [
-  { id: 1, name: "StreamerHost", isHost: true },
-  { id: 2, name: "PlayerOne" },
-  { id: 3, name: "Viewer_22" },
-  { id: 4, name: "TikTokFan" },
-];
+type Player = {
+  id: string;
+  name: string;
+};
 
 const Lobby = () => {
-  const { gameId } = useParams();
+  const { gameId: gameCode } = useParams();
   const navigate = useNavigate();
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [gameDetails, setGameDetails] = useState<any>(null);
+  const [isHost, setIsHost] = useState(false);
 
-  const handleStartGame = () => {
-    // Placeholder for Supabase logic to start the game
-    console.log("Starting game:", gameId);
-    navigate(`/game/${gameId}`);
+  useEffect(() => {
+    const currentPlayerId = sessionStorage.getItem("playerId");
+    if (!gameCode || !currentPlayerId) {
+      showError("Invalid session. Redirecting home.");
+      navigate("/");
+      return;
+    }
+
+    const fetchGameAndPlayers = async () => {
+      const { data: gameData, error: gameError } = await supabase
+        .from("games")
+        .select("id, host_player_id, status")
+        .eq("game_code", gameCode)
+        .single();
+
+      if (gameError || !gameData) {
+        showError("Game not found.");
+        navigate("/");
+        return null;
+      }
+
+      setGameDetails(gameData);
+      setIsHost(currentPlayerId === gameData.host_player_id);
+
+      const { data: playersData, error: playersError } = await supabase
+        .from("players")
+        .select("id, name")
+        .eq("game_id", gameData.id);
+
+      if (playersError) {
+        showError("Could not fetch players.");
+      } else {
+        setPlayers(playersData || []);
+      }
+      return gameData;
+    };
+
+    const setupSubscription = (game: any) => {
+      if (!game) return null;
+      const channel = supabase
+        .channel(`lobby-${game.id}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "players", filter: `game_id=eq.${game.id}` },
+          () => fetchGameAndPlayers()
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${game.id}` },
+          (payload) => {
+            if (payload.new.status === "in_progress") {
+              navigate(`/game/${gameCode}`);
+            }
+          }
+        )
+        .subscribe();
+      return channel;
+    };
+
+    let subscription: any;
+    const initialize = async () => {
+      const game = await fetchGameAndPlayers();
+      subscription = setupSubscription(game);
+    };
+
+    initialize();
+
+    return () => {
+      if (subscription) {
+        supabase.removeChannel(subscription);
+      }
+    };
+  }, [gameCode, navigate]);
+
+  const handleStartGame = async () => {
+    if (!isHost || !gameDetails) return;
+    const { error } = await supabase
+      .from("games")
+      .update({ status: "in_progress" })
+      .eq("id", gameDetails.id);
+
+    if (error) {
+      showError("Failed to start the game.");
+    }
   };
 
   const copyGameId = () => {
-    if (gameId) {
-      navigator.clipboard.writeText(gameId);
+    if (gameCode) {
+      navigator.clipboard.writeText(gameCode);
       showSuccess("Game ID copied to clipboard!");
     }
   };
@@ -37,7 +119,7 @@ const Lobby = () => {
           <CardTitle className="text-center text-2xl">Game Lobby</CardTitle>
           <div className="flex items-center justify-center gap-2 pt-2">
             <span className="text-lg font-mono bg-gray-200 dark:bg-gray-800 px-3 py-1 rounded">
-              {gameId}
+              {gameCode}
             </span>
             <Button variant="ghost" size="icon" onClick={copyGameId}>
               <Copy className="h-4 w-4" />
@@ -45,9 +127,9 @@ const Lobby = () => {
           </div>
         </CardHeader>
         <CardContent>
-          <h3 className="text-lg font-semibold mb-4 text-center">Players</h3>
+          <h3 className="text-lg font-semibold mb-4 text-center">Players ({players.length})</h3>
           <div className="space-y-3">
-            {placeholderPlayers.map((player) => (
+            {players.map((player) => (
               <div
                 key={player.id}
                 className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded-md"
@@ -59,7 +141,7 @@ const Lobby = () => {
                   </Avatar>
                   <span className="font-medium">{player.name}</span>
                 </div>
-                {player.isHost && (
+                {player.id === gameDetails?.host_player_id && (
                   <span className="text-xs font-bold text-primary uppercase">
                     Host
                   </span>
@@ -68,11 +150,13 @@ const Lobby = () => {
             ))}
           </div>
         </CardContent>
-        <div className="p-6">
-          <Button className="w-full" onClick={handleStartGame}>
-            Start Game
-          </Button>
-        </div>
+        {isHost && (
+          <div className="p-6">
+            <Button className="w-full" onClick={handleStartGame}>
+              Start Game
+            </Button>
+          </div>
+        )}
       </Card>
     </div>
   );
