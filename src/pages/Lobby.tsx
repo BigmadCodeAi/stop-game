@@ -4,7 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useParams, useNavigate } from "react-router-dom";
 import { Copy } from "lucide-react";
 import { showSuccess, showError } from "@/utils/toast";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
@@ -19,44 +19,7 @@ const Lobby = () => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameDetails, setGameDetails] = useState<any>(null);
   const [isHost, setIsHost] = useState(false);
-
-  const fetchGameData = useCallback(async () => {
-    if (!gameCode) return null;
-
-    const { data: gameData, error: gameError } = await supabase
-      .from("games")
-      .select("id, host_player_id, status")
-      .eq("game_code", gameCode)
-      .single();
-
-    if (gameError || !gameData) {
-      showError("Game not found.");
-      navigate("/");
-      return null;
-    }
-
-    if (gameData.status === "in_progress") {
-      navigate(`/game/${gameCode}`);
-      return null;
-    }
-
-    const currentPlayerId = sessionStorage.getItem("playerId");
-    setGameDetails(gameData);
-    setIsHost(currentPlayerId === gameData.host_player_id);
-
-    const { data: playersData, error: playersError } = await supabase
-      .from("players")
-      .select("id, name")
-      .eq("game_id", gameData.id);
-
-    if (playersError) {
-      showError("Could not fetch players.");
-    } else {
-      setPlayers(playersData || []);
-    }
-    
-    return gameData;
-  }, [gameCode, navigate]);
+  const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
     const currentPlayerId = sessionStorage.getItem("playerId");
@@ -68,13 +31,54 @@ const Lobby = () => {
 
     let channel: RealtimeChannel | null = null;
 
+    const fetchGameAndPlayers = async () => {
+      const { data: gameData, error: gameError } = await supabase
+        .from("games")
+        .select("id, host_player_id, status")
+        .eq("game_code", gameCode)
+        .single();
+
+      if (gameError || !gameData) {
+        showError("Game not found.");
+        navigate("/");
+        return null;
+      }
+
+      if (gameData.status === "in_progress") {
+        navigate(`/game/${gameCode}`);
+        return null;
+      }
+
+      setGameDetails(gameData);
+      setIsHost(currentPlayerId === gameData.host_player_id);
+
+      const { data: playersData, error: playersError } = await supabase
+        .from("players")
+        .select("id, name")
+        .eq("game_id", gameData.id);
+
+      if (playersError) {
+        showError("Could not fetch players.");
+      } else {
+        setPlayers(playersData || []);
+      }
+      
+      return gameData;
+    };
+
     const setupSubscription = (gameId: string) => {
       channel = supabase
         .channel(`lobby-${gameId}`)
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` },
-          () => fetchGameData()
+          async () => {
+            const { data: updatedPlayers } = await supabase
+              .from("players")
+              .select("id, name")
+              .eq("game_id", gameId);
+            setPlayers(updatedPlayers || []);
+          }
         )
         .on(
           "postgres_changes",
@@ -88,7 +92,7 @@ const Lobby = () => {
         .subscribe();
     };
 
-    fetchGameData().then(gameData => {
+    fetchGameAndPlayers().then(gameData => {
       if (gameData) {
         setupSubscription(gameData.id);
       }
@@ -99,10 +103,12 @@ const Lobby = () => {
         supabase.removeChannel(channel);
       }
     };
-  }, [gameCode, navigate, fetchGameData]);
+  }, [gameCode, navigate]);
 
   const handleStartGame = async () => {
-    if (!isHost || !gameDetails) return;
+    if (!isHost || !gameDetails || isStarting) return;
+
+    setIsStarting(true);
 
     const { error } = await supabase.rpc('start_game_and_create_round', {
       game_id_param: gameDetails.id
@@ -111,6 +117,7 @@ const Lobby = () => {
     if (error) {
       showError("Failed to start the game.");
       console.error(error);
+      setIsStarting(false);
     }
   };
 
@@ -161,8 +168,8 @@ const Lobby = () => {
         </CardContent>
         {isHost && (
           <div className="p-6">
-            <Button className="w-full" onClick={handleStartGame}>
-              Start Game
+            <Button className="w-full" onClick={handleStartGame} disabled={isStarting}>
+              {isStarting ? "Starting..." : "Start Game"}
             </Button>
           </div>
         )}
