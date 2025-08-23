@@ -6,6 +6,7 @@ import { Copy } from "lucide-react";
 import { showSuccess, showError } from "@/utils/toast";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 type Player = {
   id: string;
@@ -27,7 +28,9 @@ const Lobby = () => {
       return;
     }
 
-    const fetchGameAndPlayers = async () => {
+    let channel: RealtimeChannel | null = null;
+
+    const fetchAndSubscribe = async () => {
       const { data: gameData, error: gameError } = await supabase
         .from("games")
         .select("id, host_player_id, status")
@@ -37,12 +40,12 @@ const Lobby = () => {
       if (gameError || !gameData) {
         showError("Game not found.");
         navigate("/");
-        return null;
+        return;
       }
 
       if (gameData.status === "in_progress") {
         navigate(`/game/${gameCode}`);
-        return null;
+        return;
       }
 
       setGameDetails(gameData);
@@ -58,21 +61,23 @@ const Lobby = () => {
       } else {
         setPlayers(playersData || []);
       }
-      return gameData;
-    };
 
-    const setupSubscription = (game: any) => {
-      if (!game) return null;
-      const channel = supabase
-        .channel(`lobby-${game.id}`)
+      channel = supabase
+        .channel(`lobby-${gameData.id}`)
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "players", filter: `game_id=eq.${game.id}` },
-          () => fetchGameAndPlayers()
+          { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameData.id}` },
+          async () => {
+            const { data: updatedPlayers } = await supabase
+              .from("players")
+              .select("id, name")
+              .eq("game_id", gameData.id);
+            setPlayers(updatedPlayers || []);
+          }
         )
         .on(
           "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${game.id}` },
+          { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameData.id}` },
           (payload) => {
             if (payload.new.status === "in_progress") {
               navigate(`/game/${gameCode}`);
@@ -80,20 +85,13 @@ const Lobby = () => {
           }
         )
         .subscribe();
-      return channel;
     };
 
-    let subscription: any;
-    const initialize = async () => {
-      const game = await fetchGameAndPlayers();
-      subscription = setupSubscription(game);
-    };
-
-    initialize();
+    fetchAndSubscribe();
 
     return () => {
-      if (subscription) {
-        supabase.removeChannel(subscription);
+      if (channel) {
+        supabase.removeChannel(channel);
       }
     };
   }, [gameCode, navigate]);
@@ -101,7 +99,6 @@ const Lobby = () => {
   const handleStartGame = async () => {
     if (!isHost || !gameDetails) return;
 
-    // Start a transaction to ensure both operations succeed
     const { error } = await supabase.rpc('start_game_and_create_round', {
       game_id_param: gameDetails.id
     });

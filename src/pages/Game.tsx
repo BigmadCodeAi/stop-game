@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import Voting from "./Voting";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 export type Player = {
   id: string;
@@ -80,7 +81,10 @@ const Game = () => {
       return;
     }
 
-    const fetchInitialData = async () => {
+    let playerChannel: RealtimeChannel | null = null;
+    let roundChannel: RealtimeChannel | null = null;
+
+    const fetchAndSubscribe = async () => {
       setLoading(true);
       const { data: gameData, error: gameError } = await supabase
         .from("games")
@@ -113,8 +117,7 @@ const Game = () => {
       
       setLoading(false);
 
-      // Setup subscriptions
-      const playerChannel = supabase
+      playerChannel = supabase
         .channel(`game-players-${gameData.id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${gameData.id}` },
           () => {
@@ -122,7 +125,7 @@ const Game = () => {
           }
         ).subscribe();
 
-      const roundChannel = supabase
+      roundChannel = supabase
         .channel(`game-rounds-${gameData.id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rounds', filter: `game_id=eq.${gameData.id}` },
           async () => {
@@ -135,14 +138,14 @@ const Game = () => {
             setCurrentRound(newActiveOrVotingRound || null);
           }
         ).subscribe();
-
-      return () => {
-        supabase.removeChannel(playerChannel);
-        supabase.removeChannel(roundChannel);
-      };
     };
 
-    fetchInitialData();
+    fetchAndSubscribe();
+
+    return () => {
+      if (playerChannel) supabase.removeChannel(playerChannel);
+      if (roundChannel) supabase.removeChannel(roundChannel);
+    };
   }, [gameCode, navigate]);
 
   const handleAnswerChange = (category: string, value: string) => {
