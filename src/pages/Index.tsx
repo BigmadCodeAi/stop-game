@@ -33,7 +33,7 @@ const Index = () => {
 
       const { data: gameData, error: gameError } = await supabase
         .from("games")
-        .insert({ game_code: gameCode })
+        .insert({ game_code: gameCode, status: 'lobby' })
         .select()
         .single();
 
@@ -76,7 +76,7 @@ const Index = () => {
       const { data: gameData, error: gameError } = await supabase
         .from("games")
         .select("id, status")
-        .eq("game_code", gameId.trim())
+        .eq("game_code", gameId.trim().toUpperCase())
         .single();
 
       if (gameError || !gameData) throw new Error("Game not found.");
@@ -93,7 +93,7 @@ const Index = () => {
       sessionStorage.setItem("playerId", playerData.id);
       sessionStorage.setItem("gameId", gameData.id);
 
-      navigate(`/lobby/${gameId.trim()}`);
+      navigate(`/lobby/${gameId.trim().toUpperCase()}`);
     } catch (error: any) {
       console.error("Error joining game:", error);
       showError(error.message || "Failed to join game.");
