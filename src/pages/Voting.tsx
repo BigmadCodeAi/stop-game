@@ -32,6 +32,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
   const [allAnswers, setAllAnswers] = useState<PlayerAnswer[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,6 +83,22 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
       showError("Failed to cast vote.");
       console.error(error);
     }
+  };
+
+  const handleFinishVoting = async () => {
+    if (currentPlayerId !== hostPlayerId) return;
+    setIsSubmitting(true);
+    const { error } = await supabase.rpc('calculate_scores_and_start_next_round', {
+      game_id_param: round.game_id,
+      round_id_param: round.id
+    });
+
+    if (error) {
+      showError("Failed to calculate scores.");
+      console.error(error);
+      setIsSubmitting(false);
+    }
+    // No need to set submitting to false on success, as the component will unmount.
   };
 
   const answersByCategory = round.categories.reduce((acc, category) => {
@@ -152,7 +169,9 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
       </CardContent>
       {isHost && (
         <CardFooter>
-            <Button className="w-full">Finish Voting & Calculate Scores</Button>
+            <Button className="w-full" onClick={handleFinishVoting} disabled={isSubmitting}>
+              {isSubmitting ? "Calculating..." : "Finish Voting & Calculate Scores"}
+            </Button>
         </CardFooter>
       )}
     </Card>

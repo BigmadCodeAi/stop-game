@@ -17,6 +17,7 @@ export type Player = {
 
 export type Round = {
   id: string;
+  game_id: string;
   letter: string;
   categories: string[];
   status: string;
@@ -62,6 +63,14 @@ const Game = () => {
       handleSubmitAnswers();
     }
   }, [currentRound?.status, hasSubmitted, handleSubmitAnswers]);
+
+  // Reset state when a new round begins
+  useEffect(() => {
+    if (currentRound) {
+      setAnswers({});
+      setHasSubmitted(false);
+    }
+  }, [currentRound?.id]);
 
   useEffect(() => {
     const currentPlayerId = sessionStorage.getItem("playerId");
@@ -115,11 +124,15 @@ const Game = () => {
 
       const roundChannel = supabase
         .channel(`game-rounds-${gameData.id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rounds', filter: `game_id=eq.${gameData.id}` },
-          (payload) => {
-            if (payload.new.status === 'voting' || payload.new.status === 'active') {
-              setCurrentRound(payload.new as Round);
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rounds', filter: `game_id=eq.${gameData.id}` },
+          async () => {
+            const { data: roundsData, error } = await supabase.from('rounds').select('*').eq('game_id', gameData.id);
+            if (error) {
+              console.error("Error refetching rounds", error);
+              return;
             }
+            const newActiveOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
+            setCurrentRound(newActiveOrVotingRound || null);
           }
         ).subscribe();
 
