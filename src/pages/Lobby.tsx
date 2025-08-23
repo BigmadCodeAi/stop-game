@@ -22,7 +22,7 @@ const Lobby = () => {
   const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
-    const currentPlayerId = sessionStorage.getItem("playerId");
+    const currentPlayerId = localStorage.getItem("playerId");
     if (!gameCode || !currentPlayerId) {
       showError("Invalid session. Redirecting home.");
       navigate("/");

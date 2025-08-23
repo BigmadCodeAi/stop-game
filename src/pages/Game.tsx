@@ -37,7 +37,7 @@ const Game = () => {
   const handleSubmitAnswers = useCallback(async () => {
     if (!currentRound || hasSubmitted) return;
 
-    const currentPlayerId = sessionStorage.getItem("playerId");
+    const currentPlayerId = localStorage.getItem("playerId");
     if (!currentPlayerId) {
       showError("Player session not found.");
       return;
@@ -74,7 +74,7 @@ const Game = () => {
   }, [currentRound?.id]);
 
   useEffect(() => {
-    const currentPlayerId = sessionStorage.getItem("playerId");
+    const currentPlayerId = localStorage.getItem("playerId");
     if (!gameCode || !currentPlayerId) {
       showError("Invalid session. Redirecting home.");
       navigate("/");

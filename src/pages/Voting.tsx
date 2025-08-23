@@ -36,7 +36,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
-    setCurrentPlayerId(sessionStorage.getItem("playerId"));
+    setCurrentPlayerId(localStorage.getItem("playerId"));
 
     const fetchAnswersAndVotes = async () => {
       setLoading(true);

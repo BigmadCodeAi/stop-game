@@ -54,8 +54,8 @@ const Index = () => {
 
       if (updateError) throw updateError;
 
-      sessionStorage.setItem("playerId", playerData.id);
-      sessionStorage.setItem("gameId", gameData.id);
+      localStorage.setItem("playerId", playerData.id);
+      localStorage.setItem("gameId", gameData.id);
 
       navigate(`/lobby/${gameCode}`);
     } catch (error: any) {
@@ -90,8 +90,8 @@ const Index = () => {
 
       if (playerError || !playerData) throw playerError;
 
-      sessionStorage.setItem("playerId", playerData.id);
-      sessionStorage.setItem("gameId", gameData.id);
+      localStorage.setItem("playerId", playerData.id);
+      localStorage.setItem("gameId", gameData.id);
 
       navigate(`/lobby/${gameId.trim().toUpperCase()}`);
     } catch (error: any) {
