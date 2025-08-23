@@ -30,6 +30,7 @@ const Game = () => {
   const [answers, setAnswers] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(true);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [hostPlayerId, setHostPlayerId] = useState<string | null>(null);
 
   const handleSubmitAnswers = useCallback(async () => {
     if (!currentRound || hasSubmitted) return;
@@ -74,7 +75,7 @@ const Game = () => {
       setLoading(true);
       const { data: gameData, error: gameError } = await supabase
         .from("games")
-        .select("id, status, rounds(*), players(*)")
+        .select("id, status, host_player_id, rounds(*), players(*)")
         .eq("game_code", gameCode)
         .single();
 
@@ -84,6 +85,7 @@ const Game = () => {
         return;
       }
 
+      setHostPlayerId(gameData.host_player_id);
       const activeOrVotingRound = gameData.rounds.find(r => r.status === 'active' || r.status === 'voting');
       setCurrentRound(activeOrVotingRound || null);
       setPlayers(gameData.players || []);
@@ -174,7 +176,7 @@ const Game = () => {
         {/* Game Area */}
         <div className="lg:col-span-3">
           {isVotingPhase && currentRound ? (
-            <Voting round={currentRound} players={players} />
+            <Voting round={currentRound} players={players} hostPlayerId={hostPlayerId} />
           ) : isRoundActive && currentRound ? (
             <Card>
               <CardHeader className="text-center">
