@@ -40,6 +40,11 @@ const Lobby = () => {
         return null;
       }
 
+      if (gameData.status === "in_progress") {
+        navigate(`/game/${gameCode}`);
+        return null;
+      }
+
       setGameDetails(gameData);
       setIsHost(currentPlayerId === gameData.host_player_id);
 
@@ -95,13 +100,15 @@ const Lobby = () => {
 
   const handleStartGame = async () => {
     if (!isHost || !gameDetails) return;
-    const { error } = await supabase
-      .from("games")
-      .update({ status: "in_progress" })
-      .eq("id", gameDetails.id);
+
+    // Start a transaction to ensure both operations succeed
+    const { error } = await supabase.rpc('start_game_and_create_round', {
+      game_id_param: gameDetails.id
+    });
 
     if (error) {
       showError("Failed to start the game.");
+      console.error(error);
     }
   };
 
