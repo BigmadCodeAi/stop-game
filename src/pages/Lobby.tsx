@@ -4,7 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useParams, useNavigate } from "react-router-dom";
 import { Copy } from "lucide-react";
 import { showSuccess, showError } from "@/utils/toast";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
@@ -20,6 +20,44 @@ const Lobby = () => {
   const [gameDetails, setGameDetails] = useState<any>(null);
   const [isHost, setIsHost] = useState(false);
 
+  const fetchGameData = useCallback(async () => {
+    if (!gameCode) return null;
+
+    const { data: gameData, error: gameError } = await supabase
+      .from("games")
+      .select("id, host_player_id, status")
+      .eq("game_code", gameCode)
+      .single();
+
+    if (gameError || !gameData) {
+      showError("Game not found.");
+      navigate("/");
+      return null;
+    }
+
+    if (gameData.status === "in_progress") {
+      navigate(`/game/${gameCode}`);
+      return null;
+    }
+
+    const currentPlayerId = sessionStorage.getItem("playerId");
+    setGameDetails(gameData);
+    setIsHost(currentPlayerId === gameData.host_player_id);
+
+    const { data: playersData, error: playersError } = await supabase
+      .from("players")
+      .select("id, name")
+      .eq("game_id", gameData.id);
+
+    if (playersError) {
+      showError("Could not fetch players.");
+    } else {
+      setPlayers(playersData || []);
+    }
+    
+    return gameData;
+  }, [gameCode, navigate]);
+
   useEffect(() => {
     const currentPlayerId = sessionStorage.getItem("playerId");
     if (!gameCode || !currentPlayerId) {
@@ -30,54 +68,17 @@ const Lobby = () => {
 
     let channel: RealtimeChannel | null = null;
 
-    const fetchAndSubscribe = async () => {
-      const { data: gameData, error: gameError } = await supabase
-        .from("games")
-        .select("id, host_player_id, status")
-        .eq("game_code", gameCode)
-        .single();
-
-      if (gameError || !gameData) {
-        showError("Game not found.");
-        navigate("/");
-        return;
-      }
-
-      if (gameData.status === "in_progress") {
-        navigate(`/game/${gameCode}`);
-        return;
-      }
-
-      setGameDetails(gameData);
-      setIsHost(currentPlayerId === gameData.host_player_id);
-
-      const { data: playersData, error: playersError } = await supabase
-        .from("players")
-        .select("id, name")
-        .eq("game_id", gameData.id);
-
-      if (playersError) {
-        showError("Could not fetch players.");
-      } else {
-        setPlayers(playersData || []);
-      }
-
+    const setupSubscription = (gameId: string) => {
       channel = supabase
-        .channel(`lobby-${gameData.id}`)
+        .channel(`lobby-${gameId}`)
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameData.id}` },
-          async () => {
-            const { data: updatedPlayers } = await supabase
-              .from("players")
-              .select("id, name")
-              .eq("game_id", gameData.id);
-            setPlayers(updatedPlayers || []);
-          }
+          { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` },
+          () => fetchGameData()
         )
         .on(
           "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameData.id}` },
+          { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
           (payload) => {
             if (payload.new.status === "in_progress") {
               navigate(`/game/${gameCode}`);
@@ -87,14 +88,18 @@ const Lobby = () => {
         .subscribe();
     };
 
-    fetchAndSubscribe();
+    fetchGameData().then(gameData => {
+      if (gameData) {
+        setupSubscription(gameData.id);
+      }
+    });
 
     return () => {
       if (channel) {
         supabase.removeChannel(channel);
       }
     };
-  }, [gameCode, navigate]);
+  }, [gameCode, navigate, fetchGameData]);
 
   const handleStartGame = async () => {
     if (!isHost || !gameDetails) return;
