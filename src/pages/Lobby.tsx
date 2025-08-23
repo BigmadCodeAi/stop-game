@@ -29,7 +29,8 @@ const Lobby = () => {
       return;
     }
 
-    let channel: RealtimeChannel | null = null;
+    let playerChannel: RealtimeChannel | null = null;
+    let gameChannel: RealtimeChannel | null = null;
 
     const fetchGameAndPlayers = async () => {
       const { data: gameData, error: gameError } = await supabase
@@ -66,9 +67,9 @@ const Lobby = () => {
       return gameData;
     };
 
-    const setupSubscription = (gameId: string) => {
-      channel = supabase
-        .channel(`lobby-${gameId}`)
+    const setupSubscriptions = (gameId: string) => {
+      playerChannel = supabase
+        .channel(`lobby-players-${gameId}`)
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` },
@@ -80,6 +81,10 @@ const Lobby = () => {
             setPlayers(updatedPlayers || []);
           }
         )
+        .subscribe();
+      
+      gameChannel = supabase
+        .channel(`lobby-game-status-${gameId}`)
         .on(
           "postgres_changes",
           { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
@@ -94,13 +99,16 @@ const Lobby = () => {
 
     fetchGameAndPlayers().then(gameData => {
       if (gameData) {
-        setupSubscription(gameData.id);
+        setupSubscriptions(gameData.id);
       }
     });
 
     return () => {
-      if (channel) {
-        supabase.removeChannel(channel);
+      if (playerChannel) {
+        supabase.removeChannel(playerChannel);
+      }
+      if (gameChannel) {
+        supabase.removeChannel(gameChannel);
       }
     };
   }, [gameCode, navigate]);
