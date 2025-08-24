@@ -10,6 +10,8 @@ import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { showError } from "@/utils/toast";
 import { useI18n } from "@/contexts/I18nContext";
 import { useCategoryTranslator } from "@/utils/category-translator";
+import { CountdownTimer } from "@/components/CountdownTimer";
+import { VotingTimer } from "@/components/VotingTimer";
 
 interface VotingProps {
   round: Round;
@@ -38,9 +40,19 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  const [showVotingCountdown, setShowVotingCountdown] = useState(false);
+  const [votingCountdownShown, setVotingCountdownShown] = useState(false);
+  const [votingTimeUp, setVotingTimeUp] = useState(false);
+  const [hasVoted, setHasVoted] = useState(false);
 
   useEffect(() => {
     setCurrentPlayerId(localStorage.getItem("playerId"));
+
+    // Show voting countdown only once when component mounts
+    if (!votingCountdownShown) {
+      setShowVotingCountdown(true);
+      setVotingCountdownShown(true);
+    }
 
     const fetchAnswersAndVotes = async () => {
       setLoading(true);
@@ -73,7 +85,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
   }, [round.id]);
 
   const handleVote = async (category: string, subjectPlayerId: string, isValid: boolean) => {
-    if (!currentPlayerId) return;
+    if (!currentPlayerId || hasVoted) return;
 
     const { error } = await supabase.from('votes').upsert({
       round_id: round.id,
@@ -86,6 +98,9 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
     if (error) {
       showError(t('failedToSubmitAnswers'));
       console.error(error);
+    } else {
+      // Mark that this player has voted
+      setHasVoted(true);
     }
   };
 
@@ -105,6 +120,36 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
     // No need to set submitting to false on success, as the component will unmount.
   };
 
+  const handleVotingTimeUp = async () => {
+    setVotingTimeUp(true);
+    
+    // Auto-submit any missing votes as valid (default behavior)
+    if (!hasVoted && currentPlayerId) {
+      // Submit default votes for all categories and players
+      const defaultVotes = [];
+      for (const category of round.categories) {
+        for (const player of players) {
+          if (player.id !== currentPlayerId) {
+            defaultVotes.push({
+              round_id: round.id,
+              category,
+              subject_player_id: player.id,
+              voter_player_id: currentPlayerId,
+              is_valid: true, // Default to valid
+            });
+          }
+        }
+      }
+      
+      // Submit all default votes
+      for (const vote of defaultVotes) {
+        await supabase.from('votes').upsert(vote);
+      }
+      
+      setHasVoted(true);
+    }
+  };
+
   const answersByCategory = round.categories.reduce((acc, category) => {
     acc[category] = allAnswers.map((playerAnswer) => {
       const player = players.find((p) => p.id === playerAnswer.player_id);
@@ -122,11 +167,37 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
 
   const isHost = currentPlayerId === hostPlayerId;
 
+  if (showVotingCountdown) {
+    return (
+      <CountdownTimer 
+        seconds={5} 
+        onComplete={() => setShowVotingCountdown(false)}
+        className="h-96 flex items-center justify-center"
+        message={t('votingStartsIn')}
+      />
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-center text-3xl">{t('votingTime')}</CardTitle>
         <p className="text-center text-gray-500">{t('reviewAnswers', { letter: round.letter })}</p>
+        
+        {/* Voting Timer */}
+        {!votingTimeUp && (
+          <VotingTimer 
+            seconds={20} 
+            onTimeUp={handleVotingTimeUp}
+            className="mt-4"
+          />
+        )}
+        
+        {votingTimeUp && (
+          <div className="text-center text-red-500 font-medium mt-4">
+            {t('timeUp')}
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         <Accordion type="single" collapsible className="w-full" defaultValue={round.categories[0]}>
@@ -149,13 +220,26 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
                         </div>
                         <div className="flex items-center gap-4">
                           <span className="text-lg font-semibold">{answer}</span>
-                          {!isOwnAnswer && (
+                          {!isOwnAnswer && !votingTimeUp && !hasVoted && (
                             <div className="flex items-center gap-1">
                               <Button size="icon" variant={myVote?.is_valid === true ? 'default' : 'outline'} onClick={() => handleVote(category, playerId, true)} className="h-8 w-8">
                                 <ThumbsUp className="h-4 w-4" />
                               </Button>
                               <span className="text-sm w-4 text-center">{upvotes}</span>
                               <Button size="icon" variant={myVote?.is_valid === false ? 'destructive' : 'outline'} onClick={() => handleVote(category, playerId, false)} className="h-8 w-8">
+                                <ThumbsDown className="h-4 w-4" />
+                              </Button>
+                              <span className="text-sm w-4 text-center">{downvotes}</span>
+                            </div>
+                          )}
+                          
+                          {!isOwnAnswer && (votingTimeUp || hasVoted) && (
+                            <div className="flex items-center gap-1">
+                              <Button size="icon" variant={myVote?.is_valid === true ? 'default' : 'outline'} disabled className="h-8 w-8">
+                                <ThumbsUp className="h-4 w-4" />
+                              </Button>
+                              <span className="text-sm w-4 text-center">{upvotes}</span>
+                              <Button size="icon" variant={myVote?.is_valid === false ? 'destructive' : 'outline'} disabled className="h-8 w-8">
                                 <ThumbsDown className="h-4 w-4" />
                               </Button>
                               <span className="text-sm w-4 text-center">{downvotes}</span>
@@ -173,8 +257,12 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
       </CardContent>
       {isHost && (
         <CardFooter>
-            <Button className="w-full" onClick={handleFinishVoting} disabled={isSubmitting}>
-              {isSubmitting ? t('calculating') : t('finishVoting')}
+            <Button 
+              className="w-full" 
+              onClick={handleFinishVoting} 
+              disabled={isSubmitting || (!votingTimeUp && !hasVoted)}
+            >
+              {isSubmitting ? t('calculating') : votingTimeUp ? t('finishVoting') : t('waitingForVotes')}
             </Button>
         </CardFooter>
       )}

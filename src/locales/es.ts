@@ -61,6 +61,8 @@ export const es = {
   stopButton: "¡STOP!",
   submitted: "¡Enviado!",
   waitingForNextRound: "Esperando la siguiente ronda...",
+  nextLetterIn: "La siguiente letra será seleccionada en",
+  seconds: "segundos",
   endGame: "Terminar Juego",
   onlyVisibleToHost: "Solo visible para el anfitrión",
 
@@ -69,6 +71,11 @@ export const es = {
   reviewAnswers: "Revisa las respuestas para la letra \"{letter}\"",
   finishVoting: "Terminar Votación y Calcular Puntuaciones",
   calculating: "Calculando...",
+  votingStartsIn: "La votación comienza en",
+  votingTimeLeft: "Tiempo de votación restante",
+  timeUp: "¡Se acabó el tiempo!",
+  autoSubmit: "Los votos se enviarán automáticamente",
+  waitingForVotes: "Esperando votos...",
 
   // Results
   gameOver: "¡Fin del Juego!",

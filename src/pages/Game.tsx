@@ -13,6 +13,7 @@ import { Flag } from "lucide-react";
 import { useI18n } from "@/contexts/I18nContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useCategoryTranslator } from "@/utils/category-translator";
+import { CountdownTimer } from "@/components/CountdownTimer";
 
 export type Player = {
   id: string;
@@ -39,6 +40,8 @@ const Game = () => {
   const [loading, setLoading] = useState(true);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [hostPlayerId, setHostPlayerId] = useState<string | null>(null);
+  const [showCountdown, setShowCountdown] = useState(false);
+  const [countdownShown, setCountdownShown] = useState(false);
 
   const handleSubmitAnswers = useCallback(async () => {
     if (!currentRound || hasSubmitted) return;
@@ -76,8 +79,17 @@ const Game = () => {
     if (currentRound) {
       setAnswers({});
       setHasSubmitted(false);
+      
+      // Show countdown only when we first get an active round and haven't shown it yet
+      if (currentRound.status === 'active' && !countdownShown) {
+        setShowCountdown(true);
+        setCountdownShown(true);
+      } else if (currentRound.status !== 'active') {
+        setShowCountdown(false);
+        setCountdownShown(false);
+      }
     }
-  }, [currentRound?.id]);
+  }, [currentRound?.id, countdownShown]);
 
   useEffect(() => {
     const currentPlayerId = localStorage.getItem("playerId");
@@ -300,32 +312,40 @@ const Game = () => {
           {isVotingPhase && currentRound ? (
             <Voting round={currentRound} players={players} hostPlayerId={hostPlayerId} />
           ) : isRoundActive && currentRound ? (
-            <Card>
-              <CardHeader className="text-center">
-                <p className="text-xl text-gray-600 dark:text-gray-400">{t('theLetterIs')}</p>
-                <h1 className="text-8xl font-bold tracking-tighter">{currentRound.letter}</h1>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {currentRound.categories.map((category) => (
-                  <div key={category}>
-                    <label className="font-semibold">{translateCategory(category)}</label>
-                    <Input
-                      placeholder={t('enterAnswer', { category: translateCategory(category).toLowerCase() })}
-                      onChange={(e) => handleAnswerChange(category, e.target.value)}
-                      className="mt-1"
-                      disabled={hasSubmitted}
-                    />
-                  </div>
-                ))}
-                <Button 
-                  className="w-full text-xl font-bold py-6 mt-6" 
-                  onClick={handleSubmitAnswers}
-                  disabled={hasSubmitted}
-                >
-                  {hasSubmitted ? t('submitted') : t('stopButton')}
-                </Button>
-              </CardContent>
-            </Card>
+            showCountdown ? (
+              <CountdownTimer 
+                seconds={10} 
+                onComplete={() => setShowCountdown(false)}
+                className="h-96 flex items-center justify-center"
+              />
+            ) : (
+              <Card>
+                <CardHeader className="text-center">
+                  <p className="text-xl text-gray-600 dark:text-gray-400">{t('theLetterIs')}</p>
+                  <h1 className="text-8xl font-bold tracking-tighter">{currentRound.letter}</h1>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {currentRound.categories.map((category) => (
+                    <div key={category}>
+                      <label className="font-semibold">{translateCategory(category)}</label>
+                      <Input
+                        placeholder={t('enterAnswer', { category: translateCategory(category).toLowerCase() })}
+                        onChange={(e) => handleAnswerChange(category, e.target.value)}
+                        className="mt-1"
+                        disabled={hasSubmitted}
+                      />
+                    </div>
+                  ))}
+                  <Button 
+                    className="w-full text-xl font-bold py-6 mt-6" 
+                    onClick={handleSubmitAnswers}
+                    disabled={hasSubmitted}
+                  >
+                    {hasSubmitted ? t('submitted') : t('stopButton')}
+                  </Button>
+                </CardContent>
+              </Card>
+            )
           ) : (
             <Card className="flex items-center justify-center h-96">
               <p className="text-xl text-gray-500">{t('waitingForNextRound')}</p>

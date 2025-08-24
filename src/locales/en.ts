@@ -61,6 +61,8 @@ export const en = {
   stopButton: "STOP!",
   submitted: "Submitted!",
   waitingForNextRound: "Waiting for the next round...",
+  nextLetterIn: "The next letter will be selected in",
+  seconds: "seconds",
   endGame: "End Game",
   onlyVisibleToHost: "Only visible to host",
 
@@ -69,6 +71,11 @@ export const en = {
   reviewAnswers: "Review the answers for the letter \"{letter}\"",
   finishVoting: "Finish Voting & Calculate Scores",
   calculating: "Calculating...",
+  votingStartsIn: "Voting starts in",
+  votingTimeLeft: "Voting time left",
+  timeUp: "Time's up!",
+  autoSubmit: "Votes will be auto-submitted",
+  waitingForVotes: "Waiting for votes...",
 
   // Results
   gameOver: "Game Over!",
