@@ -110,7 +110,7 @@ const Game = () => {
       // Fetch game data first
       const { data: gameData, error: gameError } = await supabase
         .from("games")
-        .select("id, status, host_player_id")
+        .select("id, status, host_player_id, target_score, max_rounds")
         .eq("game_code", gameCode)
         .single();
 
@@ -135,10 +135,11 @@ const Game = () => {
         .select("*")
         .eq("game_id", gameData.id);
 
+      let activeOrVotingRound = null;
       if (roundsError) {
         console.error("Error fetching rounds:", roundsError);
       } else {
-        const activeOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
+        activeOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
         setCurrentRound(activeOrVotingRound || null);
       }
 
@@ -155,16 +156,19 @@ const Game = () => {
       }
 
       // Check for existing answers if there's an active round
-      const activeOrVotingRound = roundsData?.find(r => r.status === 'active' || r.status === 'voting');
       if (activeOrVotingRound) {
-        const { data: existingAnswer } = await supabase
-          .from('answers')
-          .select('id')
-          .eq('round_id', activeOrVotingRound.id)
-          .eq('player_id', currentPlayerId)
-          .single();
-        if (existingAnswer) {
-          setHasSubmitted(true);
+        try {
+          const { data: existingAnswer, error: answerError } = await supabase
+            .from('answers')
+            .select('id')
+            .eq('round_id', activeOrVotingRound.id)
+            .eq('player_id', currentPlayerId);
+          
+          if (!answerError && existingAnswer && existingAnswer.length > 0) {
+            setHasSubmitted(true);
+          }
+        } catch (error) {
+          console.error('Error checking existing answers:', error);
         }
       }
       
@@ -186,14 +190,35 @@ const Game = () => {
             return;
           }
 
-          // Refresh players
+          // Refresh players and check for game end conditions
           const { data: refreshedPlayers } = await supabase
             .from('players')
             .select('*')
             .eq('game_id', gameData.id);
-          setPlayers(refreshedPlayers || []);
+          
+          if (refreshedPlayers) {
+            setPlayers(refreshedPlayers);
+            
+            // Check if any player has reached the target score
+            const maxScore = Math.max(...refreshedPlayers.map(p => p.score));
+            if (maxScore >= gameData.target_score) {
+              // End the game
+              const { error: endGameError } = await supabase
+                .from('games')
+                .update({ status: 'completed' })
+                .eq('id', gameData.id);
+              
+              if (!endGameError) {
+                clearInterval(pollInterval);
+                navigate(`/results/${gameCode}`);
+                return;
+              }
+            }
+          }
 
-          // Refresh rounds
+
+
+          // Refresh rounds and check for max rounds
           const { data: roundsData, error } = await supabase
             .from('rounds')
             .select('*')
@@ -202,6 +227,21 @@ const Game = () => {
           if (!error && roundsData) {
             const newActiveOrVotingRound = roundsData.find(r => r.status === 'active' || r.status === 'voting');
             setCurrentRound(newActiveOrVotingRound || null);
+            
+            // Check if max rounds reached
+            if (roundsData.length >= gameData.max_rounds) {
+              // End the game
+              const { error: endGameError } = await supabase
+                .from('games')
+                .update({ status: 'completed' })
+                .eq('id', gameData.id);
+              
+              if (!endGameError) {
+                clearInterval(pollInterval);
+                navigate(`/results/${gameCode}`);
+                return;
+              }
+            }
           }
         } catch (error) {
           console.error('Polling error:', error);

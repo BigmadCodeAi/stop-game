@@ -43,7 +43,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
   const [showVotingCountdown, setShowVotingCountdown] = useState(false);
   const [votingCountdownShown, setVotingCountdownShown] = useState(false);
   const [votingTimeUp, setVotingTimeUp] = useState(false);
-  const [hasVoted, setHasVoted] = useState(false);
+  const [myVotes, setMyVotes] = useState<Set<string>>(new Set()); // Track which player-category combinations the current player has voted on
 
   useEffect(() => {
     setCurrentPlayerId(localStorage.getItem("playerId"));
@@ -71,23 +71,30 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
 
     fetchAnswersAndVotes();
 
-    const channel = supabase
-      .channel(`voting-${round.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes', filter: `round_id=eq.${round.id}` },
-        () => {
-          supabase.from("votes").select("*").eq("round_id", round.id).then(({ data }) => setVotes(data || []));
-        }
-      ).subscribe();
+    // Set up polling instead of real-time subscription for more reliable updates
+    const pollInterval = setInterval(async () => {
+      const { data: votesData, error: votesError } = await supabase
+        .from("votes")
+        .select("*")
+        .eq("round_id", round.id);
+      
+      if (!votesError && votesData) {
+        setVotes(votesData);
+      }
+    }, 2000); // Poll every 2 seconds
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
   }, [round.id]);
 
   const handleVote = async (category: string, subjectPlayerId: string, isValid: boolean) => {
-    if (!currentPlayerId || hasVoted) return;
+    if (!currentPlayerId) return;
 
-    const { error } = await supabase.from('votes').upsert({
+    const voteKey = `${category}-${subjectPlayerId}`;
+    if (myVotes.has(voteKey)) return; // Current player already voted on this player-category combination
+
+    const { data, error } = await supabase.from('votes').upsert({
       round_id: round.id,
       category,
       subject_player_id: subjectPlayerId,
@@ -97,10 +104,20 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
 
     if (error) {
       showError(t('failedToSubmitAnswers'));
-      console.error(error);
+      console.error('Vote submission error:', error);
     } else {
-      // Mark that this player has voted
-      setHasVoted(true);
+      // Mark that the current player has voted on this player-category combination
+      setMyVotes(prev => new Set([...prev, voteKey]));
+      
+      // Immediately update local votes state to show the vote
+      const newVote = {
+        round_id: round.id,
+        category,
+        subject_player_id: subjectPlayerId,
+        voter_player_id: currentPlayerId,
+        is_valid: isValid,
+      };
+      setVotes(prev => [...prev.filter(v => !(v.category === category && v.subject_player_id === subjectPlayerId && v.voter_player_id === currentPlayerId)), newVote]);
     }
   };
 
@@ -124,19 +141,22 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
     setVotingTimeUp(true);
     
     // Auto-submit any missing votes as valid (default behavior)
-    if (!hasVoted && currentPlayerId) {
-      // Submit default votes for all categories and players
+    if (currentPlayerId) {
+      // Submit default votes for all categories and players that the current player hasn't voted on
       const defaultVotes = [];
       for (const category of round.categories) {
         for (const player of players) {
           if (player.id !== currentPlayerId) {
-            defaultVotes.push({
-              round_id: round.id,
-              category,
-              subject_player_id: player.id,
-              voter_player_id: currentPlayerId,
-              is_valid: true, // Default to valid
-            });
+            const voteKey = `${category}-${player.id}`;
+            if (!myVotes.has(voteKey)) {
+              defaultVotes.push({
+                round_id: round.id,
+                category,
+                subject_player_id: player.id,
+                voter_player_id: currentPlayerId,
+                is_valid: true, // Default to valid
+              });
+            }
           }
         }
       }
@@ -146,20 +166,28 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
         await supabase.from('votes').upsert(vote);
       }
       
-      setHasVoted(true);
+      // Mark all remaining combinations as voted on by the current player
+      const remainingVoteKeys = round.categories.flatMap(category =>
+        players
+          .filter(player => player.id !== currentPlayerId)
+          .map(player => `${category}-${player.id}`)
+      );
+      setMyVotes(prev => new Set([...prev, ...remainingVoteKeys]));
     }
   };
 
   const answersByCategory = round.categories.reduce((acc, category) => {
-    acc[category] = allAnswers.map((playerAnswer) => {
-      const player = players.find((p) => p.id === playerAnswer.player_id);
-      return {
-        playerId: player?.id || '',
-        playerName: player?.name || "Unknown",
-        playerAvatar: `https://api.dicebear.com/8.x/bottts/svg?seed=${player?.name}`,
-        answer: playerAnswer.answers?.[category] || "-",
-      };
-    });
+    acc[category] = allAnswers
+      .filter((playerAnswer) => playerAnswer.player_id !== currentPlayerId) // Only show other players' answers
+      .map((playerAnswer) => {
+        const player = players.find((p) => p.id === playerAnswer.player_id);
+        return {
+          playerId: player?.id || '',
+          playerName: player?.name || "Unknown",
+          playerAvatar: `https://api.dicebear.com/8.x/bottts/svg?seed=${player?.name}`,
+          answer: playerAnswer.answers?.[category] || "-",
+        };
+      });
     return acc;
   }, {} as { [key: string]: { playerId: string; playerName: string; playerAvatar: string; answer: string }[] });
 
@@ -207,10 +235,11 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
               <AccordionContent>
                 <div className="space-y-4">
                   {answersByCategory[category]?.map(({ playerId, playerName, playerAvatar, answer }, index) => {
-                    const isOwnAnswer = playerId === currentPlayerId;
                     const myVote = votes.find(v => v.category === category && v.subject_player_id === playerId && v.voter_player_id === currentPlayerId);
                     const upvotes = votes.filter(v => v.category === category && v.subject_player_id === playerId && v.is_valid).length;
                     const downvotes = votes.filter(v => v.category === category && v.subject_player_id === playerId && !v.is_valid).length;
+                    
+
 
                     return (
                       <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
@@ -220,7 +249,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
                         </div>
                         <div className="flex items-center gap-4">
                           <span className="text-lg font-semibold">{answer}</span>
-                          {!isOwnAnswer && !votingTimeUp && !hasVoted && (
+                          {!votingTimeUp && !myVotes.has(`${category}-${playerId}`) && (
                             <div className="flex items-center gap-1">
                               <Button size="icon" variant={myVote?.is_valid === true ? 'default' : 'outline'} onClick={() => handleVote(category, playerId, true)} className="h-8 w-8">
                                 <ThumbsUp className="h-4 w-4" />
@@ -233,7 +262,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
                             </div>
                           )}
                           
-                          {!isOwnAnswer && (votingTimeUp || hasVoted) && (
+                          {(votingTimeUp || myVotes.has(`${category}-${playerId}`)) && (
                             <div className="flex items-center gap-1">
                               <Button size="icon" variant={myVote?.is_valid === true ? 'default' : 'outline'} disabled className="h-8 w-8">
                                 <ThumbsUp className="h-4 w-4" />
@@ -260,7 +289,7 @@ const Voting = ({ round, players, hostPlayerId }: VotingProps) => {
             <Button 
               className="w-full" 
               onClick={handleFinishVoting} 
-              disabled={isSubmitting || (!votingTimeUp && !hasVoted)}
+              disabled={isSubmitting || (!votingTimeUp && myVotes.size === 0)}
             >
               {isSubmitting ? t('calculating') : votingTimeUp ? t('finishVoting') : t('waitingForVotes')}
             </Button>
