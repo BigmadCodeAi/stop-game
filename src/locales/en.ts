@@ -80,6 +80,8 @@ export const en = {
   waitingForVotes: "Waiting for votes...",
   someoneFinished: "{playerName} has finished!",
   finishCountdown: "You have {seconds} seconds to finish!",
+  waitingForOthers: "Waiting for others to finish...",
+  othersHaveTimeToFinish: "Other players have 10 seconds to complete their answers",
 
   // Results
   gameOver: "Game Over!",

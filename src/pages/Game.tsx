@@ -15,6 +15,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useCategoryTranslator } from "@/utils/category-translator";
 import { CountdownTimer } from "@/components/CountdownTimer";
 import { FinishCountdownTimer } from "@/components/FinishCountdownTimer";
+import { WaitingForOthersTimer } from "@/components/WaitingForOthersTimer";
 
 export type Player = {
   id: string;
@@ -46,6 +47,8 @@ const Game = () => {
   const [showFinishCountdown, setShowFinishCountdown] = useState(false);
   const [finishCountdownShown, setFinishCountdownShown] = useState(false);
   const [firstFinisherName, setFirstFinisherName] = useState<string>('');
+  const [isFirstFinisher, setIsFirstFinisher] = useState(false);
+  const [finishCountdownSeconds, setFinishCountdownSeconds] = useState(10);
 
   const handleSubmitAnswers = useCallback(async () => {
     if (!currentRound || hasSubmitted) return;
@@ -70,21 +73,40 @@ const Game = () => {
 
     const isFirstFinisher = !existingAnswers || existingAnswers.length === 0;
 
-    const { error } = await supabase.rpc('submit_answers_and_end_round', {
-        round_id_param: currentRound.id,
-        player_id_param: currentPlayerId,
-        answers_param: answers
-    });
+    if (isFirstFinisher) {
+      // First player - just submit answers without ending round
+      const { error } = await supabase
+        .from('answers')
+        .insert({
+          round_id: currentRound.id,
+          player_id: currentPlayerId,
+          answers: answers
+        });
 
-    if (error) {
+      if (error) {
         showError(t('failedToSubmitAnswers'));
         console.error(error);
         setHasSubmitted(false); // Re-enable on error
-    } else if (isFirstFinisher) {
-        // Trigger countdown for other players
+      } else {
+        // First player sees "waiting for others" message
         setFirstFinisherName(playerName);
+        setIsFirstFinisher(true);
         setShowFinishCountdown(true);
         setFinishCountdownShown(true);
+      }
+    } else {
+      // Not first player - submit answers normally
+      const { error } = await supabase.rpc('submit_answers_and_end_round', {
+          round_id_param: currentRound.id,
+          player_id_param: currentPlayerId,
+          answers_param: answers
+      });
+
+      if (error) {
+        showError(t('failedToSubmitAnswers'));
+        console.error(error);
+        setHasSubmitted(false); // Re-enable on error
+      }
     }
   }, [answers, currentRound, hasSubmitted, players]);
 
@@ -108,6 +130,8 @@ const Game = () => {
         // Reset finish countdown when starting a new active round
         setShowFinishCountdown(false);
         setFinishCountdownShown(false);
+        setIsFirstFinisher(false);
+        setFinishCountdownSeconds(10);
       } else if (currentRound.status === 'voting') {
         // Hide all countdowns when entering voting phase
         setShowCountdown(false);
@@ -117,6 +141,50 @@ const Game = () => {
       }
     }
   }, [currentRound?.id, currentRound?.status, countdownShown]);
+
+  // Handle finish countdown timer
+  useEffect(() => {
+    if (showFinishCountdown && !isFirstFinisher && finishCountdownSeconds > 0) {
+      const timer = setTimeout(() => {
+        setFinishCountdownSeconds(prev => prev - 1);
+      }, 1000);
+
+      return () => clearTimeout(timer);
+    } else if (showFinishCountdown && !isFirstFinisher && finishCountdownSeconds === 0) {
+      // Countdown finished, end the round
+      setShowFinishCountdown(false);
+      if (currentRound) {
+        // Auto-submit answers for players who haven't submitted yet
+        const currentPlayerId = localStorage.getItem("playerId");
+        if (currentPlayerId && !hasSubmitted && Object.keys(answers).length > 0) {
+          // Submit current player's answers if they haven't submitted yet
+          supabase
+            .from('answers')
+            .insert({
+              round_id: currentRound.id,
+              player_id: currentPlayerId,
+              answers: answers
+            })
+            .then(({ error }) => {
+              if (error) {
+                console.error('Error auto-submitting answers:', error);
+              }
+            });
+        }
+
+        // Update round status to voting
+        supabase
+          .from('rounds')
+          .update({ status: 'voting' })
+          .eq('id', currentRound.id)
+          .then(({ error }) => {
+            if (error) {
+              console.error('Error ending round after countdown:', error);
+            }
+          });
+      }
+    }
+  }, [showFinishCountdown, isFirstFinisher, finishCountdownSeconds, currentRound, hasSubmitted, answers]);
 
   useEffect(() => {
     const currentPlayerId = localStorage.getItem("playerId");
@@ -204,11 +272,17 @@ const Game = () => {
                   .eq('round_id', activeOrVotingRound.id);
                 
                 if (allAnswers && allAnswers.length > 0) {
-                  // Someone has finished, show countdown for current player
+                  // Someone has finished, show countdown for current player (not the first finisher)
                   const finisher = players.find(p => p.id === allAnswers[0].player_id);
-                  setFirstFinisherName(finisher?.name || 'Unknown Player');
-                  setShowFinishCountdown(true);
-                  setFinishCountdownShown(true);
+                  const currentPlayerId = localStorage.getItem("playerId");
+                  
+                  if (finisher && finisher.id !== currentPlayerId) {
+                    setFirstFinisherName(finisher.name);
+                    setIsFirstFinisher(false); // This player is NOT the first finisher
+                    setShowFinishCountdown(true);
+                    setFinishCountdownShown(true);
+                    setFinishCountdownSeconds(10); // Reset countdown to 10 seconds
+                  }
                 }
               }
             } catch (error) {
@@ -271,6 +345,28 @@ const Game = () => {
           if (!error && roundsData) {
             const newActiveOrVotingRound = roundsData.find(r => r.status === 'active' || r.status === 'voting');
             setCurrentRound(newActiveOrVotingRound || null);
+            
+            // Check if someone else has finished and we haven't shown the countdown yet
+            // Only show during active round, not during voting
+            if (newActiveOrVotingRound && newActiveOrVotingRound.status === 'active' && !hasSubmitted && !finishCountdownShown) {
+              const { data: allAnswers } = await supabase
+                .from('answers')
+                .select('player_id')
+                .eq('round_id', newActiveOrVotingRound.id);
+              
+              if (allAnswers && allAnswers.length > 0) {
+                // Someone has finished, show countdown for current player (not the first finisher)
+                const finisher = refreshedPlayers?.find(p => p.id === allAnswers[0].player_id);
+                const currentPlayerId = localStorage.getItem("playerId");
+                
+                if (finisher && finisher.id !== currentPlayerId) {
+                  setFirstFinisherName(finisher.name);
+                  setIsFirstFinisher(false); // This player is NOT the first finisher
+                  setShowFinishCountdown(true);
+                  setFinishCountdownShown(true);
+                }
+              }
+            }
             
             // Check if max rounds reached
             if (roundsData.length >= gameData.max_rounds) {
@@ -402,40 +498,63 @@ const Game = () => {
                 onComplete={() => setShowCountdown(false)}
                 className="h-96 flex items-center justify-center"
               />
-            ) : showFinishCountdown && isRoundActive ? (
-              <FinishCountdownTimer 
-                seconds={10} 
-                onComplete={() => setShowFinishCountdown(false)}
-                className="h-96 flex items-center justify-center"
-                playerName={firstFinisherName}
-              />
             ) : (
-              <Card>
-                <CardHeader className="text-center">
-                  <p className="text-xl text-gray-600 dark:text-gray-400">{t('theLetterIs')}</p>
-                  <h1 className="text-8xl font-bold tracking-tighter">{currentRound.letter}</h1>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {currentRound.categories.map((category) => (
-                    <div key={category}>
-                      <label className="font-semibold">{translateCategory(category)}</label>
-                      <Input
-                        placeholder={t('enterAnswer', { category: translateCategory(category).toLowerCase() })}
-                        onChange={(e) => handleAnswerChange(category, e.target.value)}
-                        className="mt-1"
+              <div className="relative">
+                {/* Show waiting message for first finisher, or answer form for others */}
+                {showFinishCountdown && isRoundActive && isFirstFinisher ? (
+                  <WaitingForOthersTimer 
+                    className="h-96 flex items-center justify-center"
+                    playerName={firstFinisherName}
+                  />
+                ) : (
+                  <Card>
+                    <CardHeader className="text-center">
+                      <p className="text-xl text-gray-600 dark:text-gray-400">{t('theLetterIs')}</p>
+                      <h1 className="text-8xl font-bold tracking-tighter">{currentRound.letter}</h1>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {currentRound.categories.map((category) => (
+                        <div key={category}>
+                          <label className="font-semibold">{translateCategory(category)}</label>
+                          <Input
+                            placeholder={t('enterAnswer', { category: translateCategory(category).toLowerCase() })}
+                            onChange={(e) => handleAnswerChange(category, e.target.value)}
+                            className="mt-1"
+                            disabled={hasSubmitted}
+                          />
+                        </div>
+                      ))}
+                      <Button 
+                        className="w-full text-xl font-bold py-6 mt-6" 
+                        onClick={handleSubmitAnswers}
                         disabled={hasSubmitted}
-                      />
+                      >
+                        {hasSubmitted ? t('submitted') : t('stopButton')}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+                
+                {/* Countdown below letter for other players */}
+                {showFinishCountdown && isRoundActive && !isFirstFinisher && (
+                  <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="text-center">
+                      <p className="text-lg font-semibold text-red-600 dark:text-red-400 mb-2">
+                        {t('someoneFinished', { playerName: firstFinisherName })}
+                      </p>
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="text-red-600 dark:text-red-400">{t('finishCountdown', { seconds: finishCountdownSeconds })}</span>
+                        <div className="w-16 h-2 bg-red-200 dark:bg-red-800 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-red-500 transition-all duration-1000 ease-linear"
+                            style={{ width: `${((10 - finishCountdownSeconds) / 10) * 100}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                  <Button 
-                    className="w-full text-xl font-bold py-6 mt-6" 
-                    onClick={handleSubmitAnswers}
-                    disabled={hasSubmitted}
-                  >
-                    {hasSubmitted ? t('submitted') : t('stopButton')}
-                  </Button>
-                </CardContent>
-              </Card>
+                  </div>
+                )}
+              </div>
             )
           ) : (
             <Card className="flex items-center justify-center h-96">

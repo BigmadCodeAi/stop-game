@@ -80,6 +80,8 @@ export const es = {
   waitingForVotes: "Esperando votos...",
   someoneFinished: "¡{playerName} ha terminado!",
   finishCountdown: "¡Tienes {seconds} segundos para terminar!",
+  waitingForOthers: "Esperando a que otros terminen...",
+  othersHaveTimeToFinish: "Otros jugadores tienen 10 segundos para completar sus respuestas",
 
   // Results
   gameOver: "¡Fin del Juego!",
