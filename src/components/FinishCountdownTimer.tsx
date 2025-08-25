@@ -2,15 +2,14 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '../contexts/I18nContext';
 import { Card, CardContent } from './ui/card';
 
-interface CountdownTimerProps {
+interface FinishCountdownTimerProps {
   seconds: number;
   onComplete: () => void;
   className?: string;
-  message?: string;
-  subMessage?: string;
+  playerName: string;
 }
 
-export const CountdownTimer = ({ seconds, onComplete, className = '', message, subMessage }: CountdownTimerProps) => {
+export const FinishCountdownTimer = ({ seconds, onComplete, className = '', playerName }: FinishCountdownTimerProps) => {
   const { t } = useI18n();
   const [timeLeft, setTimeLeft] = useState(seconds);
 
@@ -37,7 +36,7 @@ export const CountdownTimer = ({ seconds, onComplete, className = '', message, s
           {/* Progress bar */}
           <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
             <div 
-              className="bg-primary h-2 rounded-full transition-all duration-1000 ease-linear"
+              className="bg-red-500 h-2 rounded-full transition-all duration-1000 ease-linear"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -45,13 +44,13 @@ export const CountdownTimer = ({ seconds, onComplete, className = '', message, s
           {/* Countdown text */}
           <div className="space-y-2">
             <p className="text-lg text-gray-600 dark:text-gray-400">
-              {message || t('nextLetterIn')}
+              {t('someoneFinished', { playerName })}
             </p>
-            <div className="text-6xl font-bold text-primary">
+            <div className="text-6xl font-bold text-red-500">
               {timeLeft}
             </div>
             <p className="text-sm text-gray-500">
-              {subMessage || t('seconds')}
+              {t('finishCountdown', { seconds: timeLeft })}
             </p>
           </div>
         </div>

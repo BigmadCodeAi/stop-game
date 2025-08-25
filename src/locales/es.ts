@@ -2,6 +2,8 @@ export const es = {
   // Common
   loading: "Cargando...",
   error: "Error",
+  nextLetterIn: "La siguiente letra será seleccionada en",
+  seconds: "segundos",
   success: "Éxito",
   cancel: "Cancelar",
   confirm: "Confirmar",
@@ -76,6 +78,8 @@ export const es = {
   timeUp: "¡Se acabó el tiempo!",
   autoSubmit: "Los votos se enviarán automáticamente",
   waitingForVotes: "Esperando votos...",
+  someoneFinished: "¡{playerName} ha terminado!",
+  finishCountdown: "¡Tienes {seconds} segundos para terminar!",
 
   // Results
   gameOver: "¡Fin del Juego!",

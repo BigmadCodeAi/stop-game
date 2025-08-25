@@ -2,6 +2,8 @@ export const en = {
   // Common
   loading: "Loading...",
   error: "Error",
+  nextLetterIn: "The next letter will be selected in",
+  seconds: "seconds",
   success: "Success",
   cancel: "Cancel",
   confirm: "Confirm",
@@ -76,6 +78,8 @@ export const en = {
   timeUp: "Time's up!",
   autoSubmit: "Votes will be auto-submitted",
   waitingForVotes: "Waiting for votes...",
+  someoneFinished: "{playerName} has finished!",
+  finishCountdown: "You have {seconds} seconds to finish!",
 
   // Results
   gameOver: "Game Over!",

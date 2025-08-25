@@ -14,6 +14,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useCategoryTranslator } from "@/utils/category-translator";
 import { CountdownTimer } from "@/components/CountdownTimer";
+import { FinishCountdownTimer } from "@/components/FinishCountdownTimer";
 
 export type Player = {
   id: string;
@@ -42,6 +43,9 @@ const Game = () => {
   const [hostPlayerId, setHostPlayerId] = useState<string | null>(null);
   const [showCountdown, setShowCountdown] = useState(false);
   const [countdownShown, setCountdownShown] = useState(false);
+  const [showFinishCountdown, setShowFinishCountdown] = useState(false);
+  const [finishCountdownShown, setFinishCountdownShown] = useState(false);
+  const [firstFinisherName, setFirstFinisherName] = useState<string>('');
 
   const handleSubmitAnswers = useCallback(async () => {
     if (!currentRound || hasSubmitted) return;
@@ -54,6 +58,18 @@ const Game = () => {
 
     setHasSubmitted(true);
 
+    // Get current player name for the countdown message
+    const currentPlayer = players.find(p => p.id === currentPlayerId);
+    const playerName = currentPlayer?.name || 'Unknown Player';
+
+    // Check if this is the first player to finish
+    const { data: existingAnswers } = await supabase
+      .from('answers')
+      .select('player_id')
+      .eq('round_id', currentRound.id);
+
+    const isFirstFinisher = !existingAnswers || existingAnswers.length === 0;
+
     const { error } = await supabase.rpc('submit_answers_and_end_round', {
         round_id_param: currentRound.id,
         player_id_param: currentPlayerId,
@@ -64,8 +80,13 @@ const Game = () => {
         showError(t('failedToSubmitAnswers'));
         console.error(error);
         setHasSubmitted(false); // Re-enable on error
+    } else if (isFirstFinisher) {
+        // Trigger countdown for other players
+        setFirstFinisherName(playerName);
+        setShowFinishCountdown(true);
+        setFinishCountdownShown(true);
     }
-  }, [answers, currentRound, hasSubmitted]);
+  }, [answers, currentRound, hasSubmitted, players]);
 
   useEffect(() => {
     const isRoundOver = currentRound?.status !== 'active';
@@ -87,6 +108,8 @@ const Game = () => {
       } else if (currentRound.status !== 'active') {
         setShowCountdown(false);
         setCountdownShown(false);
+        setShowFinishCountdown(false);
+        setFinishCountdownShown(false);
       }
     }
   }, [currentRound?.id, countdownShown]);
@@ -155,22 +178,38 @@ const Game = () => {
         setPlayers(playersData || []);
       }
 
-      // Check for existing answers if there's an active round
-      if (activeOrVotingRound) {
-        try {
-          const { data: existingAnswer, error: answerError } = await supabase
-            .from('answers')
-            .select('id')
-            .eq('round_id', activeOrVotingRound.id)
-            .eq('player_id', currentPlayerId);
-          
-          if (!answerError && existingAnswer && existingAnswer.length > 0) {
-            setHasSubmitted(true);
+                // Check for existing answers if there's an active round
+          if (activeOrVotingRound) {
+            try {
+              const { data: existingAnswer, error: answerError } = await supabase
+                .from('answers')
+                .select('id')
+                .eq('round_id', activeOrVotingRound.id)
+                .eq('player_id', currentPlayerId);
+              
+              if (!answerError && existingAnswer && existingAnswer.length > 0) {
+                setHasSubmitted(true);
+              }
+
+              // Check if someone else has finished and we haven't shown the countdown yet
+              if (!hasSubmitted && !finishCountdownShown) {
+                const { data: allAnswers } = await supabase
+                  .from('answers')
+                  .select('player_id')
+                  .eq('round_id', activeOrVotingRound.id);
+                
+                if (allAnswers && allAnswers.length > 0) {
+                  // Someone has finished, show countdown for current player
+                  const finisher = players.find(p => p.id === allAnswers[0].player_id);
+                  setFirstFinisherName(finisher?.name || 'Unknown Player');
+                  setShowFinishCountdown(true);
+                  setFinishCountdownShown(true);
+                }
+              }
+            } catch (error) {
+              console.error('Error checking existing answers:', error);
+            }
           }
-        } catch (error) {
-          console.error('Error checking existing answers:', error);
-        }
-      }
       
       setLoading(false);
 
@@ -357,6 +396,13 @@ const Game = () => {
                 seconds={10} 
                 onComplete={() => setShowCountdown(false)}
                 className="h-96 flex items-center justify-center"
+              />
+            ) : showFinishCountdown ? (
+              <FinishCountdownTimer 
+                seconds={10} 
+                onComplete={() => setShowFinishCountdown(false)}
+                className="h-96 flex items-center justify-center"
+                playerName={firstFinisherName}
               />
             ) : (
               <Card>
