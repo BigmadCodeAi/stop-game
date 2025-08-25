@@ -105,14 +105,18 @@ const Game = () => {
       if (currentRound.status === 'active' && !countdownShown) {
         setShowCountdown(true);
         setCountdownShown(true);
-      } else if (currentRound.status !== 'active') {
+        // Reset finish countdown when starting a new active round
+        setShowFinishCountdown(false);
+        setFinishCountdownShown(false);
+      } else if (currentRound.status === 'voting') {
+        // Hide all countdowns when entering voting phase
         setShowCountdown(false);
         setCountdownShown(false);
         setShowFinishCountdown(false);
         setFinishCountdownShown(false);
       }
     }
-  }, [currentRound?.id, countdownShown]);
+  }, [currentRound?.id, currentRound?.status, countdownShown]);
 
   useEffect(() => {
     const currentPlayerId = localStorage.getItem("playerId");
@@ -192,7 +196,8 @@ const Game = () => {
               }
 
               // Check if someone else has finished and we haven't shown the countdown yet
-              if (!hasSubmitted && !finishCountdownShown) {
+              // Only show during active round, not during voting
+              if (activeOrVotingRound.status === 'active' && !hasSubmitted && !finishCountdownShown) {
                 const { data: allAnswers } = await supabase
                   .from('answers')
                   .select('player_id')
@@ -397,7 +402,7 @@ const Game = () => {
                 onComplete={() => setShowCountdown(false)}
                 className="h-96 flex items-center justify-center"
               />
-            ) : showFinishCountdown ? (
+            ) : showFinishCountdown && isRoundActive ? (
               <FinishCountdownTimer 
                 seconds={10} 
                 onComplete={() => setShowFinishCountdown(false)}
